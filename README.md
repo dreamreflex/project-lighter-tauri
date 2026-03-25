@@ -1,146 +1,59 @@
-# DreamReflexLighter
+# 项目启动器
 
-基于 Tauri v2 + React + TypeScript 的桌面项目启动器。
+基于 **Tauri v2 + React + TypeScript** 的多项目一键启动管理工具。
 
-## 构建产物说明
+[![Build & Release](https://github.com/dreamreflex/lighter/actions/workflows/release.yml/badge.svg)](https://github.com/dreamreflex/lighter/actions/workflows/release.yml)
 
-项目使用 Tauri 打包，默认会在对应平台产出安装包：
+## 下载
 
-- Linux: `.deb`、`.rpm`、`.AppImage`
-- Windows: `.msi`、`.exe`（取决于 Tauri/系统工具链配置）
+前往 [Releases](https://github.com/dreamreflex/lighter/releases) 下载对应平台的安装包：
 
-构建产物目录（通用）：
+| 平台 | 文件 |
+|------|------|
+| Windows | `*_x64-setup.exe`（NSIS 安装包）或 `*_x64_en-US.msi` |
+| Linux | `*_amd64.deb`（Debian/Ubuntu）或 `*_amd64.AppImage` |
 
-- `src-tauri/target/release/bundle/`
+> Windows 10 1903+ / Windows 11 自带 WebView2，无需额外安装。
 
-## 前置要求
+## 本地开发
 
-### 通用
+### 前置要求
 
-- Node.js 18+（建议 20+）
-- npm
-- Rust（`rustup` + stable toolchain）
-
-安装 Rust（如未安装）：
+- Node.js 20+
+- Rust（stable）
 
 ```bash
+# 安装 Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
-rustup default stable
 ```
 
-安装前端依赖：
+Linux 还需要安装系统依赖：
+
+```bash
+sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+```
+
+### 启动开发服务器
 
 ```bash
 npm install
+npm run tauri dev
 ```
 
-### Linux 额外依赖（Ubuntu/Debian）
+### 构建当前平台产物
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y \
-  build-essential \
-  pkg-config \
-  libglib2.0-dev \
-  libgtk-3-dev \
-  libayatana-appindicator3-dev \
-  librsvg2-dev \
-  libwebkit2gtk-4.1-dev
+npm install
+npm run tauri build
 ```
 
-### Windows 额外依赖
+产物位于 `src-tauri/target/release/bundle/`。
 
-- 安装 [Visual Studio Build Tools（含 C++）](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-- 安装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
+## CI / CD
 
-## 本地构建
+项目已配置 GitHub Actions（`.github/workflows/release.yml`）：
 
-### 仅构建前端
-
-```bash
-npm run build
-```
-
-### 构建桌面应用（当前平台）
-
-```bash
-CI=false npm run tauri build
-```
-
-构建完成后，产物在：
-
-- `src-tauri/target/release/bundle/`
-
-## 同时构建 Windows 和 Linux（推荐 CI 并行）
-
-由于 Tauri 原生打包依赖平台工具链，通常不能在一台 Linux 主机直接打包 Windows 安装包。推荐使用 GitHub Actions `matrix` 并行构建：Windows Runner 构建 Windows 产物，Linux Runner 构建 Linux 产物。
-
-在仓库添加 `.github/workflows/build.yml`（示例）：
-
-```yaml
-name: Build Desktop
-
-on:
-  workflow_dispatch:
-  push:
-    tags:
-      - "v*"
-
-jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, windows-latest]
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Linux system deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            pkg-config \
-            libglib2.0-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libwebkit2gtk-4.1-dev
-
-      - name: Install npm deps
-        run: npm ci
-
-      - name: Build tauri app
-        run: npm run tauri build
-
-      - name: Upload bundle artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: bundles-${{ runner.os }}
-          path: src-tauri/target/release/bundle/**
-```
-
-这样一次触发会并行得到：
-
-- `bundles-Windows`
-- `bundles-Linux`
-
-## 常见问题
-
-- 报 `glib-2.0.pc` 缺失：说明 Linux 系统依赖未安装，先执行上面的 `apt-get install` 命令。
-- 报 Rust toolchain 问题：执行 `rustup default stable`，再重试。
-- 报权限相关问题：确认命令在当前项目目录执行，并确保系统依赖安装步骤使用了 `sudo`。
+- **推送 tag**（如 `v1.0.1`）→ 自动编译 Linux + Windows 并发布 Release
+- **手动触发** → 编译产物作为 Artifact 上传，可在 Actions 页面下载（保留 7 天）
