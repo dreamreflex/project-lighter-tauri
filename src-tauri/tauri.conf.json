@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicest-to-have/tauri/v2/tooling/cli/schema.json",
+  "productName": "DreamReflexLighter",
+  "version": "1.0.0",
+  "identifier": "com.dreamreflex.lighter",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "项目启动器",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "maxWidth": 2560,
+        "maxHeight": 1600,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

@@ -1,0 +1,90 @@
+# ========================
+# Node.js / 前端
+# ========================
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# 构建缓存
+.vite/
+.cache/
+
+# ========================
+# Rust / Cargo
+# ========================
+src-tauri/target/
+
+# ========================
+# Tauri
+# ========================
+# 打包产物（安装包、可执行文件）
+src-tauri/gen/
+*.app
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+*.msi
+*.exe
+
+# ========================
+# Electron（遗留目录）
+# ========================
+Electron/node_modules/
+Electron/dist/
+
+# ========================
+# 编辑器 / IDE
+# ========================
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ========================
+# 操作系统
+# ========================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# ========================
+# 日志与临时文件
+# ========================
+*.log
+*.tmp
+*.temp
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ========================
+# 环境变量（含敏感信息）
+# ========================
+.env
+.env.local
+.env.*.local
+
+# ========================
+# 本地构建产物
+# ========================
+release-windows/
+release-linux/
+release-macos/
