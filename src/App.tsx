@@ -291,9 +291,9 @@ function App() {
           <a
             className="footer-link"
             href="#"
-            onClick={(e) => { e.preventDefault(); openUrl("https://github.com/dreamreflex/lighter"); }}
+            onClick={(e) => { e.preventDefault(); openUrl("https://github.com/dreamreflex/project-lighter-tauri"); }}
           >
-            github.com/dreamreflex/lighter
+            github.com/dreamreflex/project-lighter-tauri
           </a>
         </div>
       </footer>

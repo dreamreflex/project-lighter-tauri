@@ -2,11 +2,11 @@
 
 基于 **Tauri v2 + React + TypeScript** 的多项目一键启动管理工具。
 
-[![Build & Release](https://github.com/dreamreflex/lighter/actions/workflows/release.yml/badge.svg)](https://github.com/dreamreflex/lighter/actions/workflows/release.yml)
+[![Build & Release](https://github.com/dreamreflex/project-lighter-tauri/actions/workflows/release.yml/badge.svg)](https://github.com/dreamreflex/project-lighter-tauri/actions/workflows/release.yml)
 
 ## 下载
 
-前往 [Releases](https://github.com/dreamreflex/lighter/releases) 下载对应平台的安装包：
+前往 [Releases](https://github.com/dreamreflex/project-lighter-tauri/releases) 下载对应平台的安装包：
 
 | 平台 | 文件 |
 |------|------|
