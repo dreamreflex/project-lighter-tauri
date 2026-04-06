@@ -16,6 +16,8 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
 
 jobs:
   prepare:
@@ -95,6 +97,14 @@ jobs:
             src-tauri/target/${{ matrix.rust_target }}/release/bundle/nsis/*.exe
           if-no-files-found: warn
 
+      - name: Generate attestation - Windows
+        if: contains(matrix.platform, 'windows')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            src-tauri/target/${{ matrix.rust_target }}/release/bundle/nsis/*.exe
+            src-tauri/target/${{ matrix.rust_target }}/release/bundle/msi/*.msi
+
       # macOS: 上传 .dmg
       - name: Upload macOS artifacts
         if: contains(matrix.platform, 'macos')
@@ -105,6 +115,13 @@ jobs:
             src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg/*.dmg
           if-no-files-found: warn
 
+      - name: Generate attestation - macOS
+        if: contains(matrix.platform, 'macos')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg/*.dmg
+
       # Linux: 上传 .deb
       - name: Upload Linux artifacts
         if: contains(matrix.platform, 'ubuntu')
@@ -114,3 +131,10 @@ jobs:
           path: |
             src-tauri/target/${{ matrix.rust_target }}/release/bundle/deb/*.deb
           if-no-files-found: warn
+
+      - name: Generate attestation - Linux
+        if: contains(matrix.platform, 'ubuntu')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            src-tauri/target/${{ matrix.rust_target }}/release/bundle/deb/*.deb

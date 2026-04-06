@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { save, open as openDialog } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { save, open as openDialog, confirm } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { Config, Project, OutputEvent, ExitEvent, CommandItem } from "./types";
 import { ansiToHtml, resetAnsiState } from "./utils/ansi";
@@ -30,6 +31,8 @@ function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const outputsRef = useRef(outputs);
   outputsRef.current = outputs;
+  const statusesRef = useRef(statuses);
+  statusesRef.current = statuses;
 
   const showToast = useCallback((message: string, type: "success" | "error") => {
     const id = ++toastId;
@@ -77,6 +80,40 @@ function App() {
 
     return () => {
       unlisteners.forEach((fn) => fn());
+    };
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let skipConfirm = false;
+
+    getCurrentWindow()
+      .onCloseRequested(async (event) => {
+        if (skipConfirm) return;
+
+        const hasRunning = Object.values(statusesRef.current).some(
+          (s) => s === "running"
+        );
+        if (!hasRunning) return;
+
+        event.preventDefault();
+
+        const confirmed = await confirm(
+          "检测到目前还有未停止的项目，关闭启动器会强制停止所有项目，确定关闭吗？",
+          { title: "确认关闭", kind: "warning", okLabel: "确定关闭", cancelLabel: "取消" }
+        );
+
+        if (confirmed) {
+          skipConfirm = true;
+          getCurrentWindow().close();
+        }
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+
+    return () => {
+      unlisten?.();
     };
   }, []);
 
