@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicest-to-have/tauri/v2/tooling/cli/schema.json",
   "productName": "DreamReflexLighter",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "identifier": "com.dreamreflex.lighter",
   "build": {
     "beforeDevCommand": "npm run dev",
