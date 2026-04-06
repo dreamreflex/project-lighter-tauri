@@ -8,6 +8,7 @@ import { ansiToHtml, resetAnsiState } from "./utils/ansi";
 import ProjectCard from "./components/ProjectCard";
 import ProjectModal from "./components/ProjectModal";
 import ConfigModal from "./components/ConfigModal";
+import PortKiller from "./components/PortKiller";
 
 declare const __GIT_COMMIT__: string;
 
@@ -256,6 +257,8 @@ function App() {
           <button className="btn btn-secondary" onClick={loadConfig}>刷新</button>
         </div>
       </header>
+
+      <PortKiller onToast={showToast} />
 
       {config.projects.length === 0 ? (
         <div className="empty-state">

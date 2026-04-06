@@ -135,6 +135,111 @@ header h1 small {
   font-size: 12px;
 }
 
+/* Tool Section */
+.tool-section {
+  margin-bottom: 24px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background: var(--surface-color);
+  overflow: hidden;
+}
+
+.tool-section-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  transition: background 0.15s ease;
+}
+
+.tool-section-toggle:hover {
+  background: #fafafa;
+}
+
+.tool-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+
+.tool-section-arrow {
+  font-size: 18px;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+  transform: rotate(0deg);
+  line-height: 1;
+}
+
+.tool-section-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.tool-section-body {
+  padding: 0 20px 20px;
+  animation: toolFadeIn 0.2s ease;
+}
+
+@keyframes toolFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.port-killer-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.port-input {
+  max-width: 180px;
+  font-variant-numeric: tabular-nums;
+}
+
+.port-input::-webkit-inner-spin-button,
+.port-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.port-result {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.port-result-found {
+  background: rgba(239, 83, 80, 0.06);
+  border: 1px solid rgba(239, 83, 80, 0.15);
+  color: var(--text-primary);
+}
+
+.port-result-empty {
+  background: rgba(102, 187, 106, 0.06);
+  border: 1px solid rgba(102, 187, 106, 0.15);
+  color: var(--text-primary);
+}
+
+.port-result-text {
+  flex: 1;
+}
+
+.port-result-detail {
+  font-family: var(--mono-font);
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
 /* Project Grid */
 .projects-container {
   display: grid;

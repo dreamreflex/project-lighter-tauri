@@ -54,6 +54,161 @@ struct ProcessInfo {
     pid: u32,
 }
 
+#[derive(Debug, Serialize, Clone)]
+struct PortProcessInfo {
+    found: bool,
+    pid: Option<u32>,
+    #[serde(rename = "processName")]
+    process_name: Option<String>,
+    message: String,
+}
+
+fn get_process_name_by_pid(pid: u32) -> String {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if let Ok(output) = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
+            .creation_flags(0x08000000)
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with('"') {
+                    if let Some(end) = trimmed[1..].find('"') {
+                        return trimmed[1..end + 1].to_string();
+                    }
+                }
+            }
+        }
+        "unknown".to_string()
+    }
+
+    #[cfg(not(windows))]
+    {
+        if let Ok(output) = std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "comm="])
+            .output()
+        {
+            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !name.is_empty() {
+                return name;
+            }
+        }
+        "unknown".to_string()
+    }
+}
+
+fn find_process_on_port(port: u16) -> Result<Option<(u32, String)>, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let output = std::process::Command::new("netstat")
+            .args(["-ano", "-p", "tcp"])
+            .creation_flags(0x08000000)
+            .output()
+            .map_err(|e| format!("执行 netstat 失败: {}", e))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        for line in stdout.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 5 && parts[3] == "LISTENING" {
+                if let Some(port_str) = parts[1].rsplit(':').next() {
+                    if port_str.parse::<u16>().ok() == Some(port) {
+                        if let Ok(pid) = parts[4].parse::<u32>() {
+                            let name = get_process_name_by_pid(pid);
+                            return Ok(Some((pid, name)));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    #[cfg(not(windows))]
+    {
+        if let Ok(output) = std::process::Command::new("lsof")
+            .args(["-i", &format!(":{}", port), "-P", "-n", "-sTCP:LISTEN"])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines().skip(1) {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let Ok(pid) = parts[1].parse::<u32>() {
+                        return Ok(Some((pid, parts[0].to_string())));
+                    }
+                }
+            }
+            if output.status.success() || output.status.code() == Some(1) {
+                return Ok(None);
+            }
+        }
+
+        if let Ok(output) = std::process::Command::new("ss")
+            .args(["-tlnp"])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() < 4 {
+                    continue;
+                }
+                let local_addr = parts[3];
+                if let Some(port_str) = local_addr.rsplit(':').next() {
+                    if port_str.parse::<u16>().ok() == Some(port) {
+                        if let Some(pid_start) = line.find("pid=") {
+                            let rest = &line[pid_start + 4..];
+                            let pid_str: String =
+                                rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                            if let Ok(pid) = pid_str.parse::<u32>() {
+                                let name = if let Some(name_start) = line.find("((\"") {
+                                    let name_rest = &line[name_start + 3..];
+                                    name_rest
+                                        .split('"')
+                                        .next()
+                                        .unwrap_or("unknown")
+                                        .to_string()
+                                } else {
+                                    get_process_name_by_pid(pid)
+                                };
+                                return Ok(Some((pid, name)));
+                            }
+                        }
+                    }
+                }
+            }
+            return Ok(None);
+        }
+
+        Err("无法查找端口占用信息：lsof 和 ss 命令都不可用".to_string())
+    }
+}
+
+fn kill_process_by_pid(pid: u32) -> Result<std::process::Output, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F", "/T"])
+            .creation_flags(0x08000000)
+            .output()
+            .map_err(|e| format!("执行 taskkill 失败: {}", e))
+    }
+
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .output()
+            .map_err(|e| format!("执行 kill 失败: {}", e))
+    }
+}
+
 pub struct AppState {
     processes: Arc<Mutex<HashMap<String, ProcessInfo>>>,
 }
@@ -275,6 +430,78 @@ async fn import_config_from_file(path: String) -> Result<Config, String> {
     serde_json::from_str(&data).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn query_port(port: u16) -> Result<PortProcessInfo, String> {
+    if port == 0 {
+        return Err("端口号不能为 0".to_string());
+    }
+
+    match find_process_on_port(port)? {
+        Some((pid, name)) => Ok(PortProcessInfo {
+            found: true,
+            pid: Some(pid),
+            process_name: Some(name.clone()),
+            message: format!("端口 {} 被 {} (PID: {}) 占用", port, name, pid),
+        }),
+        None => Ok(PortProcessInfo {
+            found: false,
+            pid: None,
+            process_name: None,
+            message: format!("端口 {} 当前没有被占用", port),
+        }),
+    }
+}
+
+#[tauri::command]
+async fn kill_port(port: u16) -> Result<PortProcessInfo, String> {
+    if port == 0 {
+        return Err("端口号不能为 0".to_string());
+    }
+
+    match find_process_on_port(port)? {
+        Some((pid, name)) => {
+            let kill_result = kill_process_by_pid(pid)?;
+
+            if kill_result.status.success() {
+                Ok(PortProcessInfo {
+                    found: true,
+                    pid: Some(pid),
+                    process_name: Some(name.clone()),
+                    message: format!(
+                        "已成功终止端口 {} 上的进程 {} (PID: {})",
+                        port, name, pid
+                    ),
+                })
+            } else {
+                let stderr = String::from_utf8_lossy(&kill_result.stderr);
+                let error_detail = stderr.trim();
+                let hint = if cfg!(windows) {
+                    "可能需要以管理员权限运行本程序"
+                } else {
+                    "可能需要使用 sudo 权限运行本程序"
+                };
+                Err(format!(
+                    "无法终止进程 {} (PID: {}): {}。{}",
+                    name,
+                    pid,
+                    if error_detail.is_empty() {
+                        "未知错误"
+                    } else {
+                        error_detail
+                    },
+                    hint
+                ))
+            }
+        }
+        None => Ok(PortProcessInfo {
+            found: false,
+            pid: None,
+            process_name: None,
+            message: format!("端口 {} 当前没有被占用，无需终止", port),
+        }),
+    }
+}
+
 pub fn run() {
     let state = AppState {
         processes: Arc::new(Mutex::new(HashMap::new())),
@@ -291,6 +518,8 @@ pub fn run() {
             stop_project,
             export_config_to_file,
             import_config_from_file,
+            query_port,
+            kill_port,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {

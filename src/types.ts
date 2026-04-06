@@ -25,3 +25,10 @@ export interface ExitEvent {
   projectId: string;
   code: number;
 }
+
+export interface PortProcessInfo {
+  found: boolean;
+  pid?: number;
+  processName?: string;
+  message: string;
+}
