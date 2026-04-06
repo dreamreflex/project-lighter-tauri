@@ -431,6 +431,35 @@ async fn import_config_from_file(path: String) -> Result<Config, String> {
 }
 
 #[tauri::command]
+async fn kill_all_projects(state: State<'_, AppState>) -> Result<bool, String> {
+    let pids: Vec<u32> = {
+        let mut processes = state.processes.lock().map_err(|e| e.to_string())?;
+        let pids: Vec<u32> = processes.values().map(|p| p.pid).collect();
+        processes.clear();
+        pids
+    };
+
+    for pid in pids {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            let _ = std::process::Command::new("taskkill")
+                .args(["/pid", &pid.to_string(), "/f", "/t"])
+                .creation_flags(0x08000000)
+                .output();
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .output();
+        }
+    }
+
+    Ok(true)
+}
+
+#[tauri::command]
 async fn query_port(port: u16) -> Result<PortProcessInfo, String> {
     if port == 0 {
         return Err("端口号不能为 0".to_string());
@@ -516,34 +545,12 @@ pub fn run() {
             save_config,
             start_project,
             stop_project,
+            kill_all_projects,
             export_config_to_file,
             import_config_from_file,
             query_port,
             kill_port,
         ])
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                let app_state = window.state::<AppState>();
-                if let Ok(processes) = app_state.processes.lock() {
-                    for (_, info) in processes.iter() {
-                        #[cfg(windows)]
-                        {
-                            use std::os::windows::process::CommandExt;
-                            let _ = std::process::Command::new("taskkill")
-                                .args(["/pid", &info.pid.to_string(), "/f", "/t"])
-                                .creation_flags(0x08000000)
-                                .output();
-                        }
-                        #[cfg(not(windows))]
-                        {
-                            let _ = std::process::Command::new("kill")
-                                .args(["-9", &info.pid.to_string()])
-                                .output();
-                        }
-                    }
-                };
-            }
-        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

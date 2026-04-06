@@ -104,6 +104,7 @@ function App() {
         );
 
         if (confirmed) {
+          await invoke("kill_all_projects");
           skipConfirm = true;
           getCurrentWindow().close();
         }
