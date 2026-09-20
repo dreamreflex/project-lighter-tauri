@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Lighter
+Name[zh_CN]=项目启动器
+Comment=Native Qt project launcher
+Exec=lighter
+Icon=com.dreamreflex.lighter
+Terminal=false
+Categories=Development;Utility;
+StartupWMClass=DreamReflexLighter

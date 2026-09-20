@@ -88,3 +88,13 @@ pnpm-debug.log*
 release-windows/
 release-linux/
 release-macos/
+
+# Qt / CMake
+/build*/
+/_packages/
+CMakeUserPresets.json
+.codegraph/
+legacy/tauri/node_modules/
+legacy/tauri/dist/
+legacy/tauri/src-tauri/target/
+legacy/tauri/src-tauri/gen/

@@ -1,59 +1,86 @@
-# 项目启动器
+# Lighter · 项目启动器
 
-基于 **Tauri v2 + React + TypeScript** 的多项目一键启动管理工具。
+C++17 + **Qt 6 Widgets** 原生多项目启动器。界面、配置和进程管理均由 Qt/C++ 实现，运行时不依赖 Node.js、Rust 或 WebView。
 
-[![Build & Release](https://github.com/dreamreflex/project-lighter-tauri/actions/workflows/release.yml/badge.svg)](https://github.com/dreamreflex/project-lighter-tauri/actions/workflows/release.yml)
+## 功能
 
-## 下载
+- 项目新建、编辑、删除；原生工作目录选择器。
+- 多步骤命令顺序执行，共享 Shell 环境；步骤失败即停止后续步骤。
+- 多项目并行启动、停止、退出码反馈；关闭窗口前确认并清理子进程。
+- 实时 stdout / stderr 日志、ANSI 颜色（含 256 色和 RGB）、中文 UTF-8 输出。
+- 兼容旧版 JSON 配置；导入、导出、JSON 编辑、刷新及首次写入自动备份。
+- TCP 端口查询（IPv4 / IPv6）、进程信息、确认后结束占用进程。
+- 现代侧栏、状态概览、项目搜索与筛选、明暗主题、键盘快捷键。
+- 日志独立保留，支持复制、保存、清空和关闭自动滚动；每项目最多约 10,000 行 / 100 万字符，避免长期运行时无限增长。
 
-前往 [Releases](https://github.com/dreamreflex/project-lighter-tauri/releases) 下载对应平台的安装包：
+## 构建与启动
 
-| 平台 | 文件 |
-|------|------|
-| Windows | `*_x64-setup.exe`（NSIS 安装包）或 `*_x64_en-US.msi` |
-| Linux | `*_amd64.deb`（Debian/Ubuntu）或 `*_amd64.AppImage` |
+要求：CMake 3.21+、C++17 编译器、Qt 6.4+（Core / Gui / Widgets / Concurrent / Network / Test）。
 
-> Windows 10 1903+ / Windows 11 自带 WebView2，无需额外安装。
-
-## 本地开发
-
-### 前置要求
-
-- Node.js 20+
-- Rust（stable）
+### Linux（Ubuntu 24.04 / Debian 12 或更新版本）
 
 ```bash
-# 安装 Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-source "$HOME/.cargo/env"
+sudo apt-get install build-essential cmake ninja-build qt6-base-dev qt6-base-dev-tools lsof iproute2
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+./build/lighter
 ```
 
-Linux 还需要安装系统依赖：
+### Windows
+
+安装 Visual Studio 2022 C++ 工具、CMake 和 Qt 6 的 MSVC 64 位版本。在开发者命令提示符中：
+
+```powershell
+cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64"
+cmake --build build --config Release --parallel
+# 使用 Qt 开发环境启动，或先部署运行库
+C:/Qt/6.8.3/msvc2022_64/bin/windeployqt.exe build/Release/lighter.exe
+./build/Release/lighter.exe
+```
+
+Windows 使用系统 Windows PowerShell；Linux 使用 `/bin/sh`。配置文件格式跨平台兼容，命令语法及路径需要符合目标平台。命令是非交互执行，不提供交互式终端输入。对于持续运行的服务，后续步骤会在该服务退出后才执行；需要并发的服务应配置为不同项目。
+
+## 旧数据迁移
+
+默认直接读取 Tauri 版本使用的 `config.json`，无需手动搬迁：
+
+| 平台 | 路径 |
+| --- | --- |
+| Windows | `%APPDATA%/com.dreamreflex.lighter/config.json` |
+| Linux | `${XDG_CONFIG_HOME:-~/.config}/com.dreamreflex.lighter/config.json` |
+| macOS（未验证） | `~/Library/Application Support/com.dreamreflex.lighter/config.json` |
+
+首次保存时备份原文件至 `config.json.pre-qt.bak`，之后使用原子替换。解析失败不会覆盖原数据，可从「配置管理 → 编辑 JSON」修复。单个 `command` 与 `commands` 数组均可读取，保存时统一写入 `commands`。
+
+可隔离测试或使用其他配置文件：
 
 ```bash
-sudo apt-get install -y \
-  libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+./build/lighter --config /path/to/config.json
 ```
 
-### 启动开发服务器
+同一个配置文件只允许一个 Qt 实例打开。迁移时请先关闭旧版启动器；旧版不参与 Qt 的文件锁。
+
+## 测试与打包
 
 ```bash
-npm install
-npm run tauri dev
+ctest --test-dir build -C Release --output-on-failure
+cd build
+cpack -C Release
 ```
 
-### 构建当前平台产物
+- Linux：生成 `.deb` 和 `.tar.gz`。DEB 自动声明 Qt 运行库依赖；tar 包需要目标机器预装对应 Qt 6 运行库，不是独立 AppImage。
+- Windows：生成 ZIP 和 NSIS 安装包，自动部署 Qt DLL 和平台插件。制作 NSIS 包需要安装 NSIS。
+- GitHub Actions：Linux / Windows 构建和测试；分支、PR、手动触发上传产物，`v*` 标签发布 Release 并生成来源证明。
+- Qt 版本的发布格式为上述格式，不再生成旧版 MSI / AppImage。
 
-```bash
-npm install
-npm run tauri build
-```
+测试覆盖配置兼容和校验、备份、ANSI 分块解析、实际进程执行、失败中止、子进程停止、端口查询及原生界面基本交互。Linux 已在本地验证；Windows 相关实现需由 Windows CI 和实机验收。
 
-产物位于 `src-tauri/target/release/bundle/`。
+## 目录
 
-## CI / CD
+- `native/`：Qt/C++ 应用源码。
+- `tests/`：Qt Test 回归测试。
+- `packaging/`：桌面入口。
+- `docs/migration.md`：功能对照与实现说明。
+- `legacy/tauri/`：迁移前的完整 Tauri 源码，保留作回溯参考；不参与 Qt 构建。
 
-项目已配置 GitHub Actions（`.github/workflows/release.yml`）：
-
-- **推送 tag**（如 `v1.0.1`）→ 自动编译 Linux + Windows 并发布 Release
-- **手动触发** → 编译产物作为 Artifact 上传，可在 Actions 页面下载（保留 7 天）
+快捷键：`Ctrl+N` 新建项目、`Ctrl+F` 搜索、`F5` 刷新配置。
