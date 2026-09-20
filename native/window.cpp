@@ -17,7 +17,7 @@ QPushButton *button(const QString &text, const char *name = nullptr) {
     return widget;
 }
 }
-Window::Window(QString configPath, QWidget *parent) : QMainWindow(parent), store_(std::move(configPath)), runner_(this) {
+Window::Window(QString configPath, QWidget *parent) : QMainWindow(parent), store_(std::move(configPath)), runner_(this), batch_(runner_, this) {
     setWindowTitle(QStringLiteral("Lighter · 项目启动器")); resize(1240, 820); setMinimumSize(920, 660);
     QSettings settings(store_.path() + ".ui.ini", QSettings::IniFormat);
     dark_ = settings.value("dark", false).toBool(); applyTheme(*qApp, dark_);
@@ -50,11 +50,24 @@ Window::Window(QString configPath, QWidget *parent) : QMainWindow(parent), store
     auto *shortcut = new QShortcut(QKeySequence::New, this); connect(shortcut, &QShortcut::activated, this, [this] { editProject(true); });
     shortcut = new QShortcut(QKeySequence::Find, this); connect(shortcut, &QShortcut::activated, this, [this] { pages_->setCurrentIndex(0); search_->setFocus(); search_->selectAll(); });
     shortcut = new QShortcut(QKeySequence::Refresh, this); connect(shortcut, &QShortcut::activated, this, &Window::load);
+    connect(&batch_, &BatchLauncher::changed, this, [this] {
+        updateStats(); updateDetail();
+        statusBar()->showMessage(batch_.busy() ? (batch_.stopping() ? QStringLiteral("取消启动…") : QStringLiteral("检查 / 释放端口…")) : QString());
+        if (closing_ && !batch_.busy() && runner_.count() == 0) QTimer::singleShot(0, this, &QWidget::close);
+    });
+    connect(&batch_, &BatchLauncher::error, this, &Window::showError);
+    connect(&batch_, &BatchLauncher::confirmationNeeded, this, [this](const QString &details) {
+        batch_.confirmPorts(confirm(QStringLiteral("结束以下端口占用进程并启动所有项目？\n\n%1").arg(details)));
+    });
+    connect(&batch_, &BatchLauncher::projectStarting, this, [this](const QString &id) {
+        if (logs_.contains(id)) logs_[id]->clear();
+        renderers_[id].reset();
+    });
     connect(&runner_, &Runner::output, this, &Window::appendOutput);
     connect(&runner_, &Runner::error, this, &Window::showError);
     connect(&runner_, &Runner::stateChanged, this, [this] {
         refreshList();
-        if (closing_ && runner_.count() == 0) QTimer::singleShot(0, this, &QWidget::close);
+        if (closing_ && !batch_.busy() && runner_.count() == 0) QTimer::singleShot(0, this, &QWidget::close);
     });
     // Initial errors are shown only after the main window has entered the event loop.
     QTimer::singleShot(0, this, &Window::load);
@@ -63,7 +76,14 @@ QWidget *Window::projectPage() {
     auto *page = new QWidget; auto *layout = new QVBoxLayout(page); layout->setContentsMargins(16, 16, 16, 12); layout->setSpacing(12);
     auto *head = new QHBoxLayout;
     head->addWidget(label(QStringLiteral("项目"), "pageTitle")); head->addStretch();
-    new_ = button(QStringLiteral("新建项目"), "primary"); new_->setToolTip("Ctrl+N"); head->addWidget(new_); layout->addLayout(head);
+    startupPortsButton_ = button(QStringLiteral("启动端口")); startupPortsButton_->setObjectName("startupPortsButton");
+    head->addWidget(startupPortsButton_); connect(startupPortsButton_, &QPushButton::clicked, this, &Window::editStartupPorts);
+    batchButton_ = button(QStringLiteral("一键启动"), "primary"); batchButton_->setObjectName("batchButton"); batchButton_->setProperty("primary", true); head->addWidget(batchButton_);
+    connect(batchButton_, &QPushButton::clicked, this, [this] {
+        if (batch_.busy() || runner_.count()) batch_.stop();
+        else if (loaded_) batch_.start(config_);
+    });
+    new_ = button(QStringLiteral("新建项目")); new_->setToolTip("Ctrl+N"); head->addWidget(new_); layout->addLayout(head);
     connect(new_, &QPushButton::clicked, this, [this] { editProject(true); });
     auto *toolbar = new QHBoxLayout;
     search_ = new QLineEdit; search_->setObjectName("projectSearch"); search_->setPlaceholderText(QStringLiteral("搜索")); search_->setToolTip(QStringLiteral("搜索项目、命令或目录（Ctrl+F）")); toolbar->addWidget(search_, 1);
@@ -131,18 +151,22 @@ const Project *Window::selected() const { const auto id = selectedId(); for (con
 void Window::updateStats() {
     total_->setText(QStringLiteral("项目 %1   ").arg(config_.projects.size())); active_->setText(QStringLiteral("运行 %1   ").arg(runner_.count()));
     int stopped = 0; for (const auto &p : config_.projects) if (!runner_.running(p.id)) ++stopped;
-    idle_->setText(QStringLiteral("停止 %1   ").arg(stopped)); new_->setEnabled(loaded_);
+    idle_->setText(QStringLiteral("停止 %1   ").arg(stopped)); new_->setEnabled(loaded_ && !batch_.busy());
+    batchButton_->setText(batch_.busy() || runner_.count() ? QStringLiteral("一键关闭") : QStringLiteral("一键启动"));
+    batchButton_->setEnabled(!batch_.stopping() && (batch_.busy() || runner_.count() || (loaded_ && !config_.projects.isEmpty())));
+    startupPortsButton_->setEnabled(loaded_ && !batch_.busy());
+    startupPortsButton_->setText(QStringLiteral("启动端口 (%1)").arg(config_.startupPorts.size()));
 }
 void Window::refreshList(const QString &select) {
     const auto old = select.isEmpty() ? selectedId() : select;
     QSignalBlocker blocker(projects_); projects_->clear();
     for (const auto &p : config_.projects) {
-        QString haystack = p.name + " " + p.workingDir;
+        QString haystack = p.name + " " + p.workingDir + " " + p.script;
         for (const auto &c : p.commands) haystack += " " + c.name + " " + c.command;
         if (!haystack.contains(search_->text(), Qt::CaseInsensitive)) continue;
         const bool running = runner_.running(p.id);
         if ((filter_->currentIndex() == 1 && !running) || (filter_->currentIndex() == 2 && running)) continue;
-        auto *item = new QListWidgetItem(QStringLiteral("%1  %2\n     %3 · %4 个步骤").arg(running ? "●" : "○", p.name, running ? QStringLiteral("运行中") : QStringLiteral("已停止")).arg(p.commands.size()), projects_);
+        auto *item = new QListWidgetItem(QStringLiteral("%1  %2\n     %3 · %4").arg(running ? "●" : "○", p.name, running ? QStringLiteral("运行中") : QStringLiteral("已停止"), p.type == "script" ? QStringLiteral("脚本") : QStringLiteral("%1 个步骤").arg(p.commands.size())), projects_);
         item->setData(Qt::UserRole, p.id); item->setToolTip(p.workingDir);
         if (p.id == old) projects_->setCurrentItem(item);
     }
@@ -166,14 +190,15 @@ void Window::updateDetail() {
     }
     title_->setText(p->name); directory_->setText(p->workingDir.isEmpty() ? QDir::currentPath() : p->workingDir);
     QStringList commands; for (int i = 0; i < p->commands.size(); ++i) commands << QStringLiteral("%1  %2  ›  %3").arg(i + 1).arg(p->commands[i].name, p->commands[i].command);
-    commands_->setText(commands.join('\n'));
-    findChild<QScrollArea *>("commandScroll")->setFixedHeight(qBound(42, int(commands.size()) * 30 + 12, 100));
+    commands_->setText(p->type == "script" ? p->script : commands.join('\n'));
+    findChild<QScrollArea *>("commandScroll")->setFixedHeight(qBound(42, (p->type == "script" ? int(p->script.count('\n')) + 1 : int(commands.size())) * 30 + 12, 100));
     const bool running = runner_.running(p->id);
-    state_->setText(running ? QStringLiteral("● 运行中") : QStringLiteral("○ 已停止")); start_->setEnabled(!running); stop_->setEnabled(running);
-    edit_->setEnabled(!running); edit_->setToolTip(running ? QStringLiteral("停止项目后可编辑") : QString());
+    state_->setText(running ? QStringLiteral("● 运行中") : QStringLiteral("○ 已停止")); start_->setEnabled(!running && !batch_.busy()); stop_->setEnabled(running);
+    edit_->setEnabled(!running && !batch_.busy()); remove_->setEnabled(!batch_.busy()); edit_->setToolTip(running ? QStringLiteral("停止项目后可编辑") : QString());
     auto *document = logs_.value(p->id, emptyLog_); if (terminal_->document() != document) terminal_->setDocument(document);
 }
 void Window::load() {
+    if (batch_.busy()) return;
     try {
         const auto config = store_.load();
         if (runner_.count() && config.json() != config_.json()) {
@@ -184,6 +209,7 @@ void Window::load() {
     } catch (const std::exception &e) { showError(QStringLiteral("加载配置失败：%1\n可在配置管理中修复 JSON 或导入配置。原文件未修改。").arg(QString::fromUtf8(e.what()))); }
 }
 bool Window::save(const Config &config, bool stopRunning) {
+    if (batch_.busy()) { showError(QStringLiteral("请先取消一键启动。")); return false; }
     try {
         store_.save(config);
         if (stopRunning) runner_.stopAll();
@@ -191,6 +217,7 @@ bool Window::save(const Config &config, bool stopRunning) {
     } catch (const std::exception &e) { showError(QString::fromUtf8(e.what())); return false; }
 }
 void Window::editProject(bool create) {
+    if (batch_.busy()) return;
     if (!loaded_) { showError(QStringLiteral("请先修复或导入有效配置。")); return; }
     const auto *p = selected(); if (!create && (!p || runner_.running(p->id))) return;
     ProjectEditor editor(create ? Project{} : *p, this);
@@ -201,12 +228,14 @@ void Window::editProject(bool create) {
     if (save(config, false)) { search_->clear(); filter_->setCurrentIndex(0); refreshList(project.id); }
 }
 void Window::removeProject() {
+    if (batch_.busy()) return;
     const auto *p = selected(); if (!p) return; const auto id = p->id;
     if (!confirm(QStringLiteral("删除项目“%1”？运行中的项目会停止，项目目录和文件不会删除。").arg(p->name))) return;
     auto config = config_; for (int i = 0; i < config.projects.size(); ++i) if (config.projects[i].id == id) { config.projects.removeAt(i); break; }
     if (save(config, false)) runner_.stop(id);
 }
 void Window::startProject() {
+    if (batch_.busy()) return;
     const auto *p = selected(); if (!p || runner_.running(p->id)) return;
     const auto project = *p; if (logs_.contains(project.id)) logs_[project.id]->clear(); renderers_[project.id].reset(); runner_.start(project);
 }
@@ -217,6 +246,27 @@ void Window::appendOutput(const QString &id, const QString &text) {
         if (terminal_->document() != logs_[id]) terminal_->setDocument(logs_[id]);
         if (follow_->isChecked()) terminal_->verticalScrollBar()->setValue(terminal_->verticalScrollBar()->maximum());
     }
+}
+void Window::editStartupPorts() {
+    if (!loaded_ || batch_.busy()) return;
+    QDialog dialog(this); dialog.setWindowTitle(QStringLiteral("启动端口")); dialog.resize(400, 360);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *hint = label(QStringLiteral("一键启动前检查并释放这些 TCP 端口。"), "muted"); layout->addWidget(hint);
+    auto *list = new QListWidget; list->setObjectName("startupPortList"); layout->addWidget(list);
+    for (const auto port : config_.startupPorts) new QListWidgetItem(QString::number(port), list);
+    auto *row = new QHBoxLayout; auto *port = new QSpinBox; port->setRange(1, 65535); port->setValue(3000); row->addWidget(port);
+    auto *add = button(QStringLiteral("添加")); auto *remove = button(QStringLiteral("移除")); row->addWidget(add); row->addWidget(remove); layout->addLayout(row);
+    connect(add, &QPushButton::clicked, &dialog, [list, port] {
+        const auto text = QString::number(port->value()); if (list->findItems(text, Qt::MatchExactly).isEmpty()) new QListWidgetItem(text, list);
+    });
+    connect(remove, &QPushButton::clicked, &dialog, [list] { delete list->takeItem(list->currentRow()); });
+    auto *buttons = new QDialogButtonBox; buttons->addButton(QStringLiteral("保存"), QDialogButtonBox::AcceptRole); buttons->addButton(QStringLiteral("取消"), QDialogButtonBox::RejectRole); layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&, this] {
+        auto config = config_; config.startupPorts.clear();
+        for (int i = 0; i < list->count(); ++i) config.startupPorts.append(list->item(i)->text().toUShort());
+        if (save(config, false)) dialog.accept();
+    }); dialog.exec();
 }
 void Window::editJson() {
     QDialog dialog(this); dialog.setWindowTitle(QStringLiteral("编辑 JSON 配置")); dialog.resize(820, 640);
@@ -275,9 +325,9 @@ void Window::killPort() {
 bool Window::confirm(const QString &text) { return QMessageBox::question(this, QStringLiteral("请确认"), text, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes; }
 void Window::showError(const QString &message) { statusBar()->showMessage(message, 10000); QMessageBox::warning(this, QStringLiteral("操作未完成"), message); }
 void Window::closeEvent(QCloseEvent *event) {
-    if (runner_.count()) {
+    if (runner_.count() || batch_.busy()) {
         event->ignore();
-        if (!closing_ && confirm(QStringLiteral("还有项目正在运行。关闭启动器会停止所有项目及其子进程，是否关闭？"))) { closing_ = true; setEnabled(false); runner_.stopAll(); }
+        if (!closing_ && confirm(QStringLiteral("关闭并停止所有项目？待执行的启动操作也会取消。"))) { closing_ = true; setEnabled(false); batch_.stop(); }
         return;
     }
     QSettings settings(store_.path() + ".ui.ini", QSettings::IniFormat); settings.setValue("geometry", saveGeometry()); event->accept();

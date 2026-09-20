@@ -3,6 +3,7 @@
 #include "runner.h"
 #include "ansi.h"
 #include "ports.h"
+#include "batch.h"
 #include <QMainWindow>
 #include <QHash>
 class QListWidget;
@@ -24,6 +25,7 @@ private:
     ConfigStore store_;
     Config config_;
     Runner runner_;
+    BatchLauncher batch_;
     QHash<QString, QTextDocument *> logs_;
     QHash<QString, AnsiRenderer> renderers_;
     bool dark_ = false, loaded_ = false, closing_ = false;
@@ -33,6 +35,7 @@ private:
     QComboBox *filter_;
     QLabel *total_, *active_, *idle_, *title_, *directory_, *commands_, *state_, *portResult_;
     QPushButton *start_, *stop_, *edit_, *remove_, *new_, *portQuery_, *portKill_;
+    QPushButton *batchButton_, *startupPortsButton_;
     QSpinBox *port_;
     QCheckBox *follow_;
     QTextEdit *terminal_;
@@ -52,6 +55,7 @@ private:
     void editProject(bool create);
     void removeProject();
     void startProject();
+    void editStartupPorts();
     void editJson();
     void importConfig();
     void exportConfig();

@@ -8,10 +8,14 @@ struct Project {
     QString id, name, workingDir;
     QList<Command> commands;
     QJsonObject extra;
+    QString type = "command";
+    QString script;
+    QList<Command> executionCommands() const;
 };
 struct Config {
     QList<Project> projects;
     QJsonObject extra;
+    QList<quint16> startupPorts;
     QByteArray json() const;
     static Config parse(const QByteArray &data);
 };

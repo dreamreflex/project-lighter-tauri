@@ -10,7 +10,7 @@ int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName("DreamReflexLighter");
     QCoreApplication::setOrganizationName("DreamReflex");
-    QCoreApplication::setApplicationVersion("2.0.0");
+    QCoreApplication::setApplicationVersion("2.0.1");
     app.setWindowIcon(QIcon(":/icon.png"));
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("原生 Qt 多项目启动器")); parser.addHelpOption(); parser.addVersionOption();

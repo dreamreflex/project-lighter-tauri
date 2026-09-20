@@ -4,6 +4,10 @@
 #include "ports.h"
 #include "window.h"
 #include "editor.h"
+#include "batch.h"
+#include <QComboBox>
+#include <QPlainTextEdit>
+#include <QSpinBox>
 #include <QtTest>
 #include <QTcpServer>
 #include <QTemporaryDir>
@@ -35,8 +39,13 @@ private slots:
     void editorAndWindow();
     void terminatePortOwner();
     void windowCloseStopsProjects();
+    void scriptConfigAndEditor();
+    void batchRunsEveryProjectOnce();
+    void batchPortPreflight();
+    void batchStopsAll();
+    void windowBatchControls();
 };
-static Project project(QString command, QString cwd = {}) { return {"test", QStringLiteral("测试项目"), cwd, {{"step", command}}, {}}; }
+static Project project(QString command, QString cwd = {}) { return {"test", QStringLiteral("测试项目"), cwd, {{"step", command}}, {}, "command", {}}; }
 void LighterTest::legacyAndRoundtrip() {
     const auto config = Config::parse(R"({"custom":42,"projects":[{"id":"a","name":"旧项目","command":"echo hello","workingDir":"","custom":true},{"id":"b","name":"新项目","commands":[{"name":"准备","command":"echo ready"},{"command":"echo done"}]}]})");
     QCOMPARE(config.projects.size(), 2); QCOMPARE(config.projects[0].commands[0].command, "echo hello");
@@ -168,6 +177,87 @@ void LighterTest::windowCloseStopsProjects() {
     };
     answer(QMessageBox::No); window.close(); QVERIFY(window.isVisible());
     answer(QMessageBox::Yes); window.close(); QTRY_VERIFY_WITH_TIMEOUT(!window.isVisible(), 10000);
+}
+void LighterTest::scriptConfigAndEditor() {
+    const auto config = Config::parse(R"({"startupPorts":[3000,8080,3000],"projects":[{"id":"s","name":"脚本","type":"script","script":"echo first\necho second"}]})");
+    QCOMPARE(config.startupPorts, QList<quint16>({3000, 8080}));
+    QCOMPARE(config.projects[0].executionCommands().size(), 1);
+    QCOMPARE(Config::parse(config.json()).projects[0].script, QString("echo first\necho second"));
+    for (const auto &json : {R"({"startupPorts":[0],"projects":[]})", R"({"startupPorts":[65536],"projects":[]})", R"({"startupPorts":[3.5],"projects":[]})", R"({"startupPorts":["80"],"projects":[]})", R"({"projects":[{"id":"s","name":"s","type":"script","script":" "}]})", R"({"projects":[{"id":"s","name":"s","type":"unknown","command":"ok"}]})"})
+        QVERIFY_EXCEPTION_THROWN(Config::parse(json), std::runtime_error);
+    ProjectEditor editor(config.projects[0]); editor.show();
+    auto *type = editor.findChild<QComboBox *>("projectTypeInput"); auto *script = editor.findChild<QPlainTextEdit *>("scriptInput");
+    QVERIFY(type); QVERIFY(script); QCOMPARE(type->currentData().toString(), "script"); QVERIFY(script->isVisible());
+    script->setPlainText("echo new\necho multiline"); QCOMPARE(editor.project().script, script->toPlainText());
+    type->setCurrentIndex(0); QVERIFY(script->isHidden()); type->setCurrentIndex(1); QCOMPARE(editor.project().script, "echo new\necho multiline");
+}
+void LighterTest::batchRunsEveryProjectOnce() {
+    QTemporaryDir dir; Runner runner; BatchLauncher batch(runner); QSignalSpy done(&runner, &Runner::finished); QSignalSpy errors(&batch, &BatchLauncher::error);
+    Config config; auto command = project("echo command", dir.path()); config.projects.append(command);
+    auto script = project({}, dir.path()); script.id = "script"; script.type = "script"; script.commands.clear();
+#ifdef Q_OS_WIN
+    script.script = "$value = '中文'\nAdd-Content -Path count.txt -Value $value\nWrite-Output $value";
+#else
+    script.script = "value='中文'\nprintf '%s\\n' \"$value\" >> count.txt\nprintf '%s\\n' \"$value\"";
+#endif
+    config.projects.append(script); batch.start(config); batch.start(config);
+    QTRY_COMPARE_WITH_TIMEOUT(done.count(), 2, 15000); QCOMPARE(errors.count(), 0); QVERIFY(!batch.busy()); QCOMPARE(runner.count(), 0);
+    for (const auto &event : done) QCOMPARE(event[1].toInt(), 0);
+    QFile file(dir.filePath("count.txt")); QVERIFY(file.open(QIODevice::ReadOnly));
+    const auto once = file.readAll(); QCOMPARE(once.count('\n'), 1); file.close();
+    batch.start(config); QTRY_COMPARE_WITH_TIMEOUT(done.count(), 4, 15000);
+    QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll().count('\n'), 2);
+}
+void LighterTest::batchPortPreflight() {
+    QTemporaryDir dir; const auto portFile = dir.filePath("port.txt");
+    QProcess child; child.start(QCoreApplication::applicationFilePath(), {"--listen", portFile});
+    QVERIFY(child.waitForStarted(5000)); QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(portFile), 10000);
+    QFile file(portFile); QVERIFY(file.open(QIODevice::ReadOnly)); const auto port = file.readAll().toUShort(); QVERIFY(port);
+    Runner runner; BatchLauncher batch(runner); QSignalSpy confirm(&batch, &BatchLauncher::confirmationNeeded); QSignalSpy started(&batch, &BatchLauncher::projectStarting); QSignalSpy errors(&batch, &BatchLauncher::error); QSignalSpy done(&runner, &Runner::finished);
+    Config config; config.projects.append(project("echo ready", dir.path())); config.startupPorts = {port};
+    batch.start(config); batch.stop(); QTRY_VERIFY_WITH_TIMEOUT(!batch.busy(), 15000); QCOMPARE(started.count(), 0); QCOMPARE(confirm.count(), 0); QVERIFY(Ports::query(port).occupied);
+    batch.start(config); QTRY_COMPARE_WITH_TIMEOUT(confirm.count(), 1, 15000); QCOMPARE(started.count(), 0); batch.confirmPorts(false); QVERIFY(!batch.busy()); QVERIFY(Ports::query(port).occupied);
+    batch.start(config); QTRY_COMPARE_WITH_TIMEOUT(confirm.count(), 2, 15000); batch.confirmPorts(true);
+    QTRY_COMPARE_WITH_TIMEOUT(done.count(), 1, 15000); QCOMPARE(errors.count(), 0); QCOMPARE(started.count(), 1); QVERIFY(!Ports::query(port).occupied);
+    if (child.state() != QProcess::NotRunning) QVERIFY(child.waitForFinished(5000));
+    // An inaccessible/protected owner must leave every project unstarted.
+    QTcpServer own; QVERIFY(own.listen(QHostAddress::LocalHost, 0)); config.startupPorts = {own.serverPort()};
+    batch.start(config); QTRY_COMPARE_WITH_TIMEOUT(confirm.count(), 3, 15000); batch.confirmPorts(true);
+    QTRY_COMPARE_WITH_TIMEOUT(errors.count(), 1, 15000); QCOMPARE(started.count(), 1); QCOMPARE(runner.count(), 0); QVERIFY(!batch.busy());
+}
+void LighterTest::batchStopsAll() {
+    Runner runner; BatchLauncher batch(runner); QSignalSpy done(&runner, &Runner::finished); Config config;
+#ifdef Q_OS_WIN
+    auto first = project("Start-Sleep 30");
+#else
+    auto first = project("sleep 30");
+#endif
+    config.projects.append(first); first.id = "second"; config.projects.append(first);
+    batch.start(config); QTRY_COMPARE_WITH_TIMEOUT(runner.count(), 2, 10000); batch.stop();
+    QTRY_COMPARE_WITH_TIMEOUT(done.count(), 2, 10000); QCOMPARE(runner.count(), 0); QVERIFY(!batch.busy());
+}
+void LighterTest::windowBatchControls() {
+    QTemporaryDir dir; ConfigStore store(dir.filePath("config.json")); Config config;
+#ifdef Q_OS_WIN
+    config.projects.append(project("Write-Output ready; Start-Sleep 30", dir.path()));
+#else
+    config.projects.append(project("echo ready; sleep 30", dir.path()));
+#endif
+    store.save(config); Window window(store.path()); window.show();
+    auto *list = window.findChild<QListWidget *>("projectList"); QTRY_COMPARE(list->count(), 1);
+    auto *batch = window.findChild<QPushButton *>("batchButton"); QVERIFY(batch); QCOMPARE(batch->text(), QStringLiteral("一键启动")); batch->click();
+    QCOMPARE(batch->text(), QStringLiteral("一键关闭"));
+    auto *terminal = window.findChild<QTextEdit *>("terminal"); QTRY_VERIFY_WITH_TIMEOUT(terminal->toPlainText().contains("ready"), 15000);
+    batch->click(); QTRY_COMPARE_WITH_TIMEOUT(batch->text(), QStringLiteral("一键启动"), 10000);
+    QTimer::singleShot(50, [] {
+        auto *dialog = QApplication::activeModalWidget(); if (!dialog) return;
+        auto *port = dialog->findChild<QSpinBox *>(); if (!port) return; port->setValue(3300);
+        const auto buttons = dialog->findChildren<QPushButton *>();
+        for (auto *button : buttons) if (button->text() == QStringLiteral("添加")) { button->click(); button->click(); }
+        for (auto *button : buttons) if (button->text() == QStringLiteral("保存")) button->click();
+    });
+    window.findChild<QPushButton *>("startupPortsButton")->click();
+    QCOMPARE(store.load().startupPorts, QList<quint16>({3300})); window.close();
 }
 int main(int argc, char **argv) {
     QApplication app(argc, argv);

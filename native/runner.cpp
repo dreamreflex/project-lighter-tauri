@@ -26,7 +26,7 @@ QString Runner::script(const Project &project) {
              "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false);\n"
              "$OutputEncoding = [Console]::OutputEncoding;\n"
              "$ErrorActionPreference = 'Stop';\ntry {\n";
-    for (const auto &command : project.commands) {
+    for (const auto &command : project.executionCommands()) {
         script += command.command + "\nif (!$?) { if ($LASTEXITCODE) { exit $LASTEXITCODE }; exit 1 }\n";
     }
     script += "} catch { [Console]::Error.WriteLine($_); exit 1 }; exit 0\n";
@@ -34,13 +34,14 @@ QString Runner::script(const Project &project) {
     // One shell preserves cd/export and other state between steps. Every failed
     // step stops the sequence; commands are intentionally user-authored shell code.
     script = "set -e\n";
-    for (const auto &command : project.commands) script += command.command + "\n";
+    for (const auto &command : project.executionCommands()) script += command.command + "\n";
 #endif
     return script;
 }
 void Runner::start(const Project &project) {
     if (running(project.id)) return;
-    if (project.commands.isEmpty()) { emit error(QStringLiteral("项目没有配置命令")); return; }
+    const auto commands = project.executionCommands();
+    if (commands.isEmpty() || (project.type == "script" && project.script.trimmed().isEmpty())) { emit error(QStringLiteral("项目没有配置命令或脚本")); return; }
     const QString cwd = project.workingDir.isEmpty() ? QDir::currentPath() : project.workingDir;
     if (!QFileInfo(cwd).isDir()) { emit error(QStringLiteral("工作目录不存在：%1").arg(cwd)); return; }
     auto job = std::make_shared<Job>();
@@ -95,8 +96,8 @@ void Runner::start(const Project &project) {
     });
     emit stateChanged(id);
     emit output(id, QStringLiteral("工作目录  %1\n").arg(cwd));
-    for (int i = 0; i < project.commands.size(); ++i)
-        emit output(id, QStringLiteral("%1. %2  ›  %3\n").arg(i + 1).arg(project.commands[i].name, project.commands[i].command));
+    for (int i = 0; i < commands.size(); ++i)
+        emit output(id, QStringLiteral("%1. %2  ›  %3\n").arg(i + 1).arg(commands[i].name, commands[i].command));
     emit output(id, "\n");
 #ifdef Q_OS_WIN
     const auto source = script(project);

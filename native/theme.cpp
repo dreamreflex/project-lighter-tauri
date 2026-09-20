@@ -44,9 +44,9 @@ void applyTheme(QApplication &application, bool dark) {
         QPushButton:pressed { background: %7; }
         QPushButton:focus, QLineEdit:focus, QPlainTextEdit:focus, QTableWidget:focus { border: 1px solid #188571; }
         QPushButton:disabled { color: %4; background: %1; }
-        QPushButton#primary { color: white; background: #188571; border-color: #188571; font-weight: 600; }
-        QPushButton#primary:hover { background: #116e5d; }
-        QPushButton#primary:disabled { background: %5; color: %4; border-color: %5; }
+        QPushButton#primary, QPushButton[primary="true"] { color: white; background: #188571; border-color: #188571; font-weight: 600; }
+        QPushButton#primary:hover, QPushButton[primary="true"]:hover { background: #116e5d; }
+        QPushButton#primary:disabled, QPushButton[primary="true"]:disabled { background: %5; color: %4; border-color: %5; }
         QPushButton#danger { color: #d55d58; }
         QPushButton#danger:disabled { color: %4; }
         QComboBox::drop-down { border: none; width: 22px; }

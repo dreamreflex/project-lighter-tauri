@@ -17,6 +17,16 @@ Config Config::parse(const QByteArray &data) {
     if (!doc.isObject() || !doc.object()["projects"].isArray()) fail(QStringLiteral("projects 必须是数组"));
     Config config;
     config.extra = doc.object();
+    const auto ports = doc.object().value("startupPorts");
+    if (!ports.isUndefined() && !ports.isArray()) fail(QStringLiteral("startupPorts 必须是端口数组"));
+    QSet<int> seenPorts;
+    for (const auto &value : ports.toArray()) {
+        const int port = value.toInt(-1);
+        if (!value.isDouble() || value.toDouble() != port || port < 1 || port > 65535)
+            fail(QStringLiteral("端口必须是 1–65535 的整数"));
+        if (!seenPorts.contains(port)) config.startupPorts.append(quint16(port));
+        seenPorts.insert(port);
+    }
     QSet<QString> ids;
     for (const auto &value : doc.object()["projects"].toArray()) {
         if (!value.isObject()) fail(QStringLiteral("项目必须是对象"));
@@ -29,7 +39,12 @@ Config Config::parse(const QByteArray &data) {
         ids.insert(p.id);
         if (!obj["workingDir"].isUndefined() && !obj["workingDir"].isNull() && !obj["workingDir"].isString()) fail(QStringLiteral("workingDir 必须是字符串"));
         p.workingDir = obj["workingDir"].toString();
-        if (obj["commands"].isArray()) {
+        p.type = obj.contains("type") ? obj["type"].toString() : QStringLiteral("command");
+        if (p.type != "command" && p.type != "script") fail(QStringLiteral("未知项目类型：%1").arg(p.type));
+        if (p.type == "script") {
+            p.script = obj["script"].toString();
+            if (p.script.trimmed().isEmpty()) fail(QStringLiteral("脚本不能为空：%1").arg(p.name));
+        } else if (obj["commands"].isArray()) {
             for (const auto &entry : obj["commands"].toArray()) {
                 const auto c = entry.toObject();
                 if (!entry.isObject() || c["command"].toString().trimmed().isEmpty()) fail(QStringLiteral("命令不能为空：%1").arg(p.name));
@@ -41,7 +56,7 @@ Config Config::parse(const QByteArray &data) {
             const auto command = obj["command"].toString();
             if (!command.trimmed().isEmpty()) p.commands.append({QStringLiteral("主命令"), command});
         }
-        if (p.commands.isEmpty()) fail(QStringLiteral("项目至少需要一条命令：%1").arg(p.name));
+        if (p.type == "command" && p.commands.isEmpty()) fail(QStringLiteral("项目至少需要一条命令：%1").arg(p.name));
         config.projects.append(p);
     }
     return config;
@@ -53,13 +68,26 @@ QByteArray Config::json() const {
         auto obj = p.extra;
         obj["id"] = p.id; obj["name"] = p.name; obj["workingDir"] = p.workingDir;
         obj.remove("command");
-        QJsonArray commands;
-        for (const auto &c : p.commands) commands.append(QJsonObject{{"name", c.name}, {"command", c.command}});
-        obj["commands"] = commands;
+        obj["type"] = p.type;
+        if (p.type == "script") {
+            obj.remove("commands"); obj["script"] = p.script;
+        } else {
+            obj.remove("script");
+            QJsonArray commands;
+            for (const auto &c : p.commands) commands.append(QJsonObject{{"name", c.name}, {"command", c.command}});
+            obj["commands"] = commands;
+        }
         projectsJson.append(obj);
     }
     root["projects"] = projectsJson;
+    QJsonArray ports;
+    for (const auto port : startupPorts) ports.append(int(port));
+    root["startupPorts"] = ports;
     return QJsonDocument(root).toJson(QJsonDocument::Indented);
+}
+QList<Command> Project::executionCommands() const {
+    if (type == "script") return {{QStringLiteral("脚本"), script}};
+    return commands;
 }
 QString ConfigStore::defaultPath() {
     // Tauri app_config_dir: Roaming on Windows, Application Support on macOS,

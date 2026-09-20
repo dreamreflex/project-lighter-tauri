@@ -40,3 +40,32 @@ Qt UI 首选项存入配置旁边的 `.ui.ini`。配置锁为 `.lock`；备份�
 - [Qt 应用运行库部署](https://doc.qt.io/qt-6/qt-generate-deploy-app-script.html)
 
 Qt 构建移除了 WebView 和前端运行时，但未做与旧版的性能基准对照，因此不承诺具体性能提升比例。
+
+## v2.0.1 配置扩展
+
+- `startupPorts`：顶层 TCP 端口数组，默认空；在主界面「启动端口」编辑。一键启动前查询占用，确认后释放并复查；失败或取消时不启动任何项目。单独启动项目不触发全局端口清理。
+- `type`：项目类型，`command` 或 `script`；缺省为 `command`，兼容所有旧配置。
+- `script`：脚本项目的多行文本。Windows 执行 PowerShell，Linux 执行 `/bin/sh`。脚本与命令项目并列参与一键启动，每轮只执行一次，退出后不会自动重启；两种项目之间没有先后依赖。
+- 一键启动忽略列表搜索/状态筛选，启动全部配置项目；存在运行任务时按钮为「一键关闭」，停止全部项目及其子进程。端口检查/释放期间也可取消待执行的启动。
+
+```json
+{
+  "startupPorts": [3000, 8080],
+  "projects": [
+    {
+      "id": "prepare",
+      "name": "准备环境",
+      "type": "script",
+      "workingDir": "",
+      "script": "echo preparing\necho done"
+    },
+    {
+      "id": "web",
+      "name": "Web",
+      "type": "command",
+      "workingDir": "/path/to/web",
+      "commands": [{"name": "启动", "command": "npm run dev"}]
+    }
+  ]
+}
+```
